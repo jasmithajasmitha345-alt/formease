@@ -12,7 +12,9 @@ import {
   Zap,
   Check
 } from 'lucide-react';
-import { FormField, NavigationTab } from '../types';
+import { FormField, NavigationTab, DocumentAnalysisResult } from '../types';
+import { FormDocumentViewer } from './FormDocumentViewer';
+import { Layers } from 'lucide-react';
 
 interface ReviewAnswersPageProps {
   fields: FormField[];
@@ -21,6 +23,7 @@ interface ReviewAnswersPageProps {
   onConfirmAndGenerate: () => void;
   onNavigate: (tab: NavigationTab) => void;
   isGenerating: boolean;
+  analysis?: DocumentAnalysisResult;
 }
 
 export const ReviewAnswersPage: React.FC<ReviewAnswersPageProps> = ({
@@ -30,9 +33,11 @@ export const ReviewAnswersPage: React.FC<ReviewAnswersPageProps> = ({
   onConfirmAndGenerate,
   onNavigate,
   isGenerating,
+  analysis,
 }) => {
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [tempValue, setTempValue] = React.useState<string | boolean>('');
+  const [displayMode, setDisplayMode] = React.useState<'sections' | 'overlay'>('sections');
 
   const sections = Array.from(new Set(fields.map(f => f.section || 'General Details')));
 
@@ -147,8 +152,60 @@ export const ReviewAnswersPage: React.FC<ReviewAnswersPageProps> = ({
           </div>
         )}
 
-        {/* Grouped Answers by Section */}
-        <div className="space-y-6">
+        {/* Inspection View Mode Selector */}
+        <div className="flex items-center justify-between bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
+          <div className="flex items-center gap-2 text-xs text-slate-700 font-semibold pl-1">
+            <Layers className="w-4 h-4 text-blue-600" />
+            <span>Review Layout Mode:</span>
+          </div>
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+            <button
+              onClick={() => setDisplayMode('sections')}
+              className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                displayMode === 'sections'
+                  ? 'bg-white text-slate-900 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Section Answers ({fields.length})
+            </button>
+            <button
+              onClick={() => setDisplayMode('overlay')}
+              className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                displayMode === 'overlay'
+                  ? 'bg-white text-slate-900 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Live Form Document Overlay
+            </button>
+          </div>
+        </div>
+
+        {displayMode === 'overlay' ? (
+          <div className="space-y-4">
+            {analysis?.base64Data ? (
+              <FormDocumentViewer
+                base64Data={analysis.base64Data}
+                fileType={analysis.fileType}
+                fileName={analysis.fileName}
+                fields={fields}
+                answers={answers}
+                showValues={true}
+                onSelectField={(f) => handleStartEdit(f)}
+              />
+            ) : (
+              <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-500 text-sm">
+                Document preview not available. Please switch to Section Answers.
+              </div>
+            )}
+            <p className="text-[11px] text-slate-500 text-center">
+              Click on any field box to edit its value directly. Coordinates scale proportionally with original form boundaries.
+            </p>
+          </div>
+        ) : (
+          /* Grouped Answers by Section */
+          <div className="space-y-6">
           {sections.map(section => {
             const sectionFields = fields.filter(f => (f.section || 'General Details') === section);
             const answeredInSec = sectionFields.filter(f => answers[f.id] !== undefined && answers[f.id] !== '').length;
@@ -263,6 +320,7 @@ export const ReviewAnswersPage: React.FC<ReviewAnswersPageProps> = ({
             );
           })}
         </div>
+        )}
 
         {/* Confirmation Footer */}
         <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">

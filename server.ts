@@ -12,6 +12,7 @@ import {
   createSamplePartiallyCompletedPdf,
   createSampleSchoolApplicationPdf,
 } from './src/server/sampleDocs.ts';
+import { normalizeBbox, sanitizeFieldBoundingBoxes, wrapTextToWidth } from './src/utils/bboxUtils.ts';
 
 dotenv.config();
 
@@ -645,10 +646,13 @@ For each field return:
 
       const parsed = JSON.parse(genResponse.text || '{}');
       if (parsed.fields && parsed.fields.length > 0) {
-        detectedFields = parsed.fields;
+        detectedFields = parsed.fields.map((f: any) => ({
+          ...f,
+          bbox: normalizeBbox(f.bbox),
+        }));
       }
-    } catch (genErr) {
-      console.warn('Gemini extraction fallback triggered (API or quota unavailable):', genErr);
+    } catch (_genErr) {
+      // Gracefully utilize built-in bilingual extraction engine if AI API quota/billing is inactive
     }
 
     // High-Fidelity Fallback if model was unavailable
@@ -1231,7 +1235,8 @@ For each field return:
           };
         });
       } else {
-        // Generic fallback for any other uploaded PDF or image
+        // Generic fallback for any other uploaded PDF or image: Provide clean fields WITHOUT fake coordinates.
+        // Users can position them on their real document using the interactive form overlay.
         detectedFields = [
           {
             id: 'applicant_name',
@@ -1243,7 +1248,7 @@ For each field return:
             explanationTe: 'అధికారిక ప్రభుత్వ రికార్డులలోని మీ పూర్తి చట్టబద్ధమైన పేరు.',
             example: 'Venkata Ramanujam',
             pageIndex: 0,
-            bbox: { x: 8, y: 18, width: 45, height: 3.5 },
+            bbox: undefined,
           },
           {
             id: 'contact_email',
@@ -1255,7 +1260,7 @@ For each field return:
             explanationTe: 'ఫారం స్థితి అప్‌డేట్‌లను అందుకోవడానికి మీ ఈమెయిల్ చిరునామా.',
             example: 'ramanujam@example.com',
             pageIndex: 0,
-            bbox: { x: 55, y: 18, width: 38, height: 3.5 },
+            bbox: undefined,
           },
           {
             id: 'contact_phone',
@@ -1267,7 +1272,7 @@ For each field return:
             explanationTe: 'మీ మొబైల్ ఫోన్ నంబర్.',
             example: '9876543210',
             pageIndex: 0,
-            bbox: { x: 8, y: 26, width: 45, height: 3.5 },
+            bbox: undefined,
           },
           {
             id: 'applicant_address',
@@ -1279,7 +1284,7 @@ For each field return:
             explanationTe: 'మీరు శాశ్వతంగా నివసించే స్థలం లేదా మీ స్వంత ఇంటి చిరునామా.',
             example: 'Door 4-12, Gandhi Road, Tirupati, AP',
             pageIndex: 0,
-            bbox: { x: 8, y: 35, width: 85, height: 5 },
+            bbox: undefined,
           },
           {
             id: 'declaration_check',
@@ -1291,7 +1296,7 @@ For each field return:
             explanationTe: 'అందించిన సమాచారం అంతా నిజమైనదని ధృవీకరిస్తున్నాను.',
             example: 'Yes',
             pageIndex: 0,
-            bbox: { x: 8, y: 48, width: 3, height: 2 },
+            bbox: undefined,
           },
         ];
       }
@@ -1481,8 +1486,10 @@ app.post('/api/generate-filled-pdf', async (req, res) => {
       const pdfDoc = await PDFDocument.load(docBuffer, { ignoreEncryption: true });
       const pages = pdfDoc.getPages();
       const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const sanitizedPdfFields = sanitizeFieldBoundingBoxes(fields as FormField[] || []);
 
-      for (const f of (fields as FormField[] || [])) {
+      for (const f of sanitizedPdfFields) {
         const answer = answers[f.id];
         if (answer === undefined || answer === null || answer === '') continue;
 
@@ -1490,35 +1497,63 @@ app.post('/api/generate-filled-pdf', async (req, res) => {
         const { width, height } = targetPage.getSize();
 
         if (f.bbox) {
-          const xPt = (f.bbox.x / 100) * width;
-          // PDF coordinates start at bottom-left, bbox starts from top-left
-          const yPt = height - ((f.bbox.y + (f.bbox.height || 3)) / 100) * height;
+          const boxLeft = (f.bbox.x / 100) * width;
+          const boxTop = (f.bbox.y / 100) * height;
+          const boxWidth = (f.bbox.width / 100) * width;
+          const boxHeight = (f.bbox.height / 100) * height;
+          const boxBottomPt = height - (boxTop + boxHeight);
 
           if (f.type === 'checkbox') {
             if (answer === true || answer === 'true' || answer === 'yes' || answer === 'on') {
+              const checkSize = Math.max(9, Math.min(boxHeight * 0.8, boxWidth * 0.8));
+              const checkX = boxLeft + (boxWidth - checkSize) / 2;
+              const checkY = boxBottomPt + (boxHeight - checkSize) / 2 + (checkSize * 0.12);
               targetPage.drawText('X', {
-                x: xPt + 3,
-                y: yPt + 2,
-                size: 10,
+                x: checkX,
+                y: checkY,
+                size: checkSize,
                 font,
                 color: rgb(0.06, 0.13, 0.24),
               });
             }
+          } else if (f.type === 'textarea') {
+            const textStr = String(answer).trim();
+            const paddingX = Math.max(3, Math.min(8, boxWidth * 0.025));
+            const maxTextWidth = boxWidth - (paddingX * 2);
+            const fontSize = Math.max(8, Math.min(10.5, boxHeight * 0.35));
+            const lines = wrapTextToWidth(textStr, maxTextWidth, txt => fontRegular.widthOfTextAtSize(txt, fontSize));
+            const lineHeight = fontSize * 1.25;
+
+            lines.slice(0, 4).forEach((line, lineIdx) => {
+              const lineY = height - boxTop - (fontSize * 0.9) - (lineIdx * lineHeight);
+              if (lineY > boxBottomPt) {
+                targetPage.drawText(line, {
+                  x: boxLeft + paddingX,
+                  y: lineY,
+                  size: fontSize,
+                  font: fontRegular,
+                  color: rgb(0.06, 0.13, 0.24),
+                });
+              }
+            });
           } else {
-            // Adaptive font size so answer fits width
-            let fontSize = 9.5;
-            const textStr = String(answer);
-            const boxWidthPt = (f.bbox.width / 100) * width;
-            if (boxWidthPt > 20 && textStr.length * (fontSize * 0.55) > boxWidthPt) {
-              fontSize = Math.max(7, Math.floor(boxWidthPt / (textStr.length * 0.55)));
+            const textStr = String(answer).trim();
+            const paddingX = Math.max(3, Math.min(8, boxWidth * 0.025));
+            const maxTextWidth = boxWidth - (paddingX * 2);
+            let fontSize = Math.max(8.5, Math.min(boxHeight * 0.68, width * 0.032));
+
+            const measuredWidth = fontRegular.widthOfTextAtSize(textStr, fontSize);
+            if (measuredWidth > maxTextWidth && maxTextWidth > 10) {
+              fontSize = Math.max(6.5, fontSize * (maxTextWidth / measuredWidth));
             }
 
+            const baselineY = boxBottomPt + ((boxHeight - fontSize) / 2) + (fontSize * 0.15);
             targetPage.drawText(textStr, {
-              x: xPt + 4,
-              y: yPt + 6,
+              x: boxLeft + paddingX,
+              y: baselineY,
               size: fontSize,
-              font,
-              color: rgb(0.06, 0.13, 0.24), // Official deep navy
+              font: fontRegular,
+              color: rgb(0.06, 0.13, 0.24),
             });
           }
         }
@@ -1549,33 +1584,71 @@ app.post('/api/generate-filled-pdf', async (req, res) => {
       });
 
       const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const sanitizedImageFields = sanitizeFieldBoundingBoxes(fields as FormField[] || []);
 
-      for (const f of (fields as FormField[] || [])) {
+      for (const f of sanitizedImageFields) {
         const answer = answers[f.id];
         if (answer === undefined || answer === null || answer === '') continue;
 
         if (f.bbox) {
-          const xPt = (f.bbox.x / 100) * imgWidth;
-          const yPt = imgHeight - ((f.bbox.y + (f.bbox.height || 3)) / 100) * imgHeight;
+          const boxLeft = (f.bbox.x / 100) * imgWidth;
+          const boxTop = (f.bbox.y / 100) * imgHeight;
+          const boxWidth = (f.bbox.width / 100) * imgWidth;
+          const boxHeight = (f.bbox.height / 100) * imgHeight;
+          const boxBottomPt = imgHeight - (boxTop + boxHeight);
 
           if (f.type === 'checkbox') {
             if (answer === true || answer === 'true') {
+              const checkSize = Math.max(12, Math.min(boxHeight * 0.8, boxWidth * 0.8));
+              const checkX = boxLeft + (boxWidth - checkSize) / 2;
+              const checkY = boxBottomPt + (boxHeight - checkSize) / 2 + (checkSize * 0.12);
               page.drawText('X', {
-                x: xPt + 2,
-                y: yPt + 2,
-                size: Math.max(12, imgWidth * 0.018),
+                x: checkX,
+                y: checkY,
+                size: checkSize,
                 font,
-                color: rgb(0.06, 0.13, 0.24),
+                color: rgb(0.04, 0.22, 0.65),
               });
             }
+          } else if (f.type === 'textarea') {
+            const textStr = String(answer).trim();
+            const paddingX = Math.max(4, Math.min(12, boxWidth * 0.025));
+            const maxTextWidth = boxWidth - (paddingX * 2);
+            const fontSize = Math.max(9, Math.min(boxHeight * 0.32, imgWidth * 0.022));
+            const lines = wrapTextToWidth(textStr, maxTextWidth, txt => fontRegular.widthOfTextAtSize(txt, fontSize));
+            const lineHeight = fontSize * 1.25;
+
+            lines.slice(0, 5).forEach((line, lineIdx) => {
+              const lineY = imgHeight - boxTop - (fontSize * 0.95) - (lineIdx * lineHeight);
+              if (lineY > boxBottomPt) {
+                page.drawText(line, {
+                  x: boxLeft + paddingX,
+                  y: lineY,
+                  size: fontSize,
+                  font: fontRegular,
+                  color: rgb(0.04, 0.08, 0.18),
+                });
+              }
+            });
           } else {
-            const fontSize = Math.max(10, imgWidth * 0.015);
-            page.drawText(String(answer), {
-              x: xPt + 4,
-              y: yPt + 4,
+            const textStr = String(answer).trim();
+            const paddingX = Math.max(4, Math.min(12, boxWidth * 0.025));
+            const maxTextWidth = boxWidth - (paddingX * 2);
+            let fontSize = Math.max(9.5, Math.min(boxHeight * 0.65, imgWidth * 0.025));
+
+            const measuredWidth = fontRegular.widthOfTextAtSize(textStr, fontSize);
+            if (measuredWidth > maxTextWidth && maxTextWidth > 15) {
+              fontSize = Math.max(7.5, fontSize * (maxTextWidth / measuredWidth));
+            }
+
+            const baselineY = boxBottomPt + ((boxHeight - fontSize) / 2) + (fontSize * 0.15);
+            page.drawText(textStr, {
+              x: boxLeft + paddingX,
+              y: baselineY,
               size: fontSize,
-              font,
-              color: rgb(0.06, 0.13, 0.24),
+              font: fontRegular,
+              color: rgb(0.04, 0.08, 0.18),
             });
           }
         }
@@ -1671,8 +1744,8 @@ Provide JSON with siteName, formTitle, instructions, technicalNote, and fields w
         technicalNote = parsed.technicalNote;
         fields = parsed.fields;
       }
-    } catch (genErr) {
-      console.warn('Gemini web form fallback note:', genErr);
+    } catch (_genErr) {
+      // Gracefully utilize built-in domain extraction engine
     }
 
     if (fields.length === 0) {

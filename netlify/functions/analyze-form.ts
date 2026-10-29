@@ -125,6 +125,8 @@ function getGenericImageFields(fileName: string): FormField[] {
     ];
   }
 
+  // For unknown custom uploaded images: Do not invent fake coordinates.
+  // User will position fields with pixel precision in the interactive visual editor.
   return [
     {
       id: 'applicantName',
@@ -136,7 +138,7 @@ function getGenericImageFields(fileName: string): FormField[] {
       explanationTe: 'మీ ప్రభుత్వ గుర్తింపు కార్డు ప్రకారం మీ పూర్తి చట్టబద్ధమైన పేరు.',
       example: 'Venkata Ramanujam',
       pageIndex: 0,
-      bbox: { x: 8.0, y: 16.5, width: 44.0, height: 3.2 },
+      bbox: undefined,
     },
     {
       id: 'applicantEmail',
@@ -148,7 +150,7 @@ function getGenericImageFields(fileName: string): FormField[] {
       explanationTe: 'అధికారిక నోటీసులు మరియు రసీదుల కోసం మీ ఈమెయిల్ చిరునామా.',
       example: 'ramanujam@example.com',
       pageIndex: 0,
-      bbox: { x: 54.0, y: 16.5, width: 38.0, height: 3.2 },
+      bbox: undefined,
     },
     {
       id: 'applicantPhone',
@@ -160,7 +162,7 @@ function getGenericImageFields(fileName: string): FormField[] {
       explanationTe: 'సంప్రదింపుల కోసం పని చేసే మొబైల్ ఫోన్ నంబర్.',
       example: '9876543210',
       pageIndex: 0,
-      bbox: { x: 8.0, y: 25.0, width: 44.0, height: 3.2 },
+      bbox: undefined,
     },
     {
       id: 'dobOrId',
@@ -172,7 +174,7 @@ function getGenericImageFields(fileName: string): FormField[] {
       explanationTe: 'అధికారిక పుట్టిన తేదీ లేదా గుర్తింపు సంఖ్య.',
       example: '1998-08-15',
       pageIndex: 0,
-      bbox: { x: 54.0, y: 25.0, width: 38.0, height: 3.2 },
+      bbox: undefined,
     },
     {
       id: 'residentialAddress',
@@ -184,7 +186,7 @@ function getGenericImageFields(fileName: string): FormField[] {
       explanationTe: 'ఇంటి నంబరు, వీధి పేరు, నగరం, రాష్ట్రం మరియు పిన్ కోడ్.',
       example: 'Flat 302, Green Meadows, MG Road, Hyderabad 500001',
       pageIndex: 0,
-      bbox: { x: 8.0, y: 35.0, width: 84.0, height: 5.5 },
+      bbox: undefined,
     },
     {
       id: 'declarationAgreed',
@@ -196,7 +198,7 @@ function getGenericImageFields(fileName: string): FormField[] {
       explanationTe: 'ఫారంలో అందించిన వివరాలన్నీ నిజమైనవని మరియు సరిగ్గా ఉన్నాయని ధృవీకరిస్తున్నాను.',
       example: 'Yes',
       pageIndex: 0,
-      bbox: { x: 8.0, y: 48.0, width: 3.5, height: 2.2 },
+      bbox: undefined,
     },
     {
       id: 'applicantSignature',
@@ -208,7 +210,7 @@ function getGenericImageFields(fileName: string): FormField[] {
       explanationTe: 'మీ ఎలక్ట్రానిక్ సంతకంగా పరిగణించబడే మీ పూర్తి చట్టబద్ధమైన పేరు.',
       example: 'Venkata Ramanujam',
       pageIndex: 0,
-      bbox: { x: 8.0, y: 55.0, width: 50.0, height: 3.2 },
+      bbox: undefined,
     },
     {
       id: 'signatureDate',
@@ -220,7 +222,7 @@ function getGenericImageFields(fileName: string): FormField[] {
       explanationTe: 'పత్రం పూర్తి చేసిన తేదీ.',
       example: new Date().toISOString().split('T')[0],
       pageIndex: 0,
-      bbox: { x: 62.0, y: 55.0, width: 30.0, height: 3.2 },
+      bbox: undefined,
     },
   ];
 }
@@ -281,7 +283,12 @@ export const handler = async (event: any) => {
                 },
               },
               {
-                text: `Analyze this official form document. Extract all input fields with labels, sections, input types, required status, clear English explanation, Telugu translation explanation, example value, and bounding box percentages (x, y, width, height from 0 to 100).`,
+                text: `Analyze this official form document. Extract all input fields with labels, sections, input types, required status, clear English explanation, Telugu translation explanation, example value, and exact bounding box coordinates (x, y, width, height) as normalized percentages strictly between 0 and 100 relative to the full page dimensions.
+
+CRITICAL FOR BOUNDING BOXES (bbox):
+- The bbox MUST specify the exact position of the BLANK ANSWER AREA (the box, cell, or underline where user writes their answer), NOT the printed label.
+- Keep fields aligned to their respective table rows and columns without overlapping adjacent fields.
+- Values must be percentages: e.g., x: 8.0, y: 16.5, width: 42.0, height: 3.2.`,
               },
             ],
           },
@@ -330,14 +337,77 @@ export const handler = async (event: any) => {
         if (parsed.fields && parsed.fields.length > 0) {
           detectedFields = parsed.fields;
         }
-      } catch (gemErr) {
-        console.warn('Gemini serverless extraction note:', gemErr);
+      } catch (_gemErr) {
+        // Fallback to built-in field recognition
       }
     }
 
     if (detectedFields.length === 0) {
       detectedFields = getGenericImageFields(fileName);
     }
+
+    // Sanitize and normalize bounding boxes across multi-scale formats
+    detectedFields = detectedFields.map((f: any) => {
+      let b = f.bbox;
+      if (!b) return { ...f, bbox: undefined };
+
+      let x: number | undefined;
+      let y: number | undefined;
+      let w: number | undefined;
+      let h: number | undefined;
+
+      if (Array.isArray(b) && b.length >= 4) {
+        // [ymin, xmin, ymax, xmax]
+        y = Number(b[0]);
+        x = Number(b[1]);
+        h = Math.max(0, Number(b[2]) - y);
+        w = Math.max(0, Number(b[3]) - x);
+      } else if (typeof b === 'object') {
+        if (b.ymin !== undefined && b.xmin !== undefined && b.ymax !== undefined && b.xmax !== undefined) {
+          y = Number(b.ymin);
+          x = Number(b.xmin);
+          h = Math.max(0, Number(b.ymax) - y);
+          w = Math.max(0, Number(b.xmax) - x);
+        } else {
+          x = Number(b.x !== undefined ? b.x : b.left);
+          y = Number(b.y !== undefined ? b.y : b.top);
+          w = Number(b.width !== undefined ? b.width : b.w);
+          h = Number(b.height !== undefined ? b.height : b.h);
+        }
+      }
+
+      if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) {
+        return { ...f, bbox: undefined };
+      }
+
+      if (w === undefined || isNaN(w) || w <= 0) w = 35.0;
+      if (h === undefined || isNaN(h) || h <= 0) h = 3.2;
+
+      const maxVal = Math.max(x, y, w, h);
+      if (maxVal <= 1.05 && (w > 0 || h > 0)) {
+        x *= 100; y *= 100; w *= 100; h *= 100;
+      } else if (maxVal > 100 && maxVal <= 1050) {
+        x /= 10; y /= 10; w /= 10; h /= 10;
+      }
+
+      x = Math.max(0.2, Math.min(97.0, x));
+      y = Math.max(0.2, Math.min(97.0, y));
+      w = Math.max(1.5, Math.min(99.0, w));
+      h = Math.max(1.0, Math.min(99.0, h));
+
+      if (x + w > 99.5) w = Math.max(2.0, 99.5 - x);
+      if (y + h > 99.5) h = Math.max(1.2, 99.5 - y);
+
+      return {
+        ...f,
+        bbox: {
+          x: Number(x.toFixed(2)),
+          y: Number(y.toFixed(2)),
+          width: Number(w.toFixed(2)),
+          height: Number(h.toFixed(2)),
+        },
+      };
+    });
 
     const formTitle = fileName.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
 

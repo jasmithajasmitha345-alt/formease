@@ -17,6 +17,8 @@ import {
   Move
 } from 'lucide-react';
 import { DocumentAnalysisResult, FormField, NavigationTab } from '../types';
+import { FormDocumentViewer } from './FormDocumentViewer';
+import { sanitizeFieldBoundingBoxes } from '../utils/bboxUtils';
 
 interface DetectedFieldsPageProps {
   analysis: DocumentAnalysisResult;
@@ -31,7 +33,8 @@ export const DetectedFieldsPage: React.FC<DetectedFieldsPageProps> = ({
   onNavigate,
   onStartQuestions,
 }) => {
-  const [fields, setFields] = React.useState<FormField[]>(analysis.fields);
+  const [fields, setFields] = React.useState<FormField[]>(() => sanitizeFieldBoundingBoxes(analysis.fields));
+  const [displayMode, setDisplayMode] = React.useState<'cards' | 'preview'>('cards');
   const [editingFieldId, setEditingFieldId] = React.useState<string | null>(null);
   const [showAddModal, setShowAddModal] = React.useState(false);
   const [calibratingField, setCalibratingField] = React.useState<FormField | null>(null);
@@ -85,6 +88,15 @@ export const DetectedFieldsPage: React.FC<DetectedFieldsPageProps> = ({
     setNewLabel('');
     setNewExplanationEn('');
     setNewExplanationTe('');
+  };
+
+  const handleUpdateBbox = (fieldId: string, newBbox: any) => {
+    const updated = fields.map(f => f.id === fieldId ? { ...f, bbox: newBbox } : f);
+    setFields(updated);
+    onUpdateFields(updated);
+    if (calibratingField && calibratingField.id === fieldId) {
+      setCalibratingField({ ...calibratingField, bbox: newBbox });
+    }
   };
 
   const handleNudgeBbox = (axis: 'x' | 'y' | 'width' | 'height', delta: number) => {
@@ -156,8 +168,54 @@ export const DetectedFieldsPage: React.FC<DetectedFieldsPageProps> = ({
           </div>
         </div>
 
-        {/* Grouped Fields Sections */}
-        <div className="space-y-6">
+        {/* View Mode Toggle: Form Preview vs Cards List */}
+        <div className="flex items-center justify-between bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
+          <div className="flex items-center gap-2 text-xs text-slate-700 font-semibold pl-1">
+            <Layers className="w-4 h-4 text-blue-600" />
+            <span>Inspection Display:</span>
+          </div>
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+            <button
+              onClick={() => setDisplayMode('cards')}
+              className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                displayMode === 'cards'
+                  ? 'bg-white text-slate-900 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Field Cards ({fields.length})
+            </button>
+            <button
+              onClick={() => setDisplayMode('preview')}
+              className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                displayMode === 'preview'
+                  ? 'bg-white text-slate-900 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Interactive Form Overlay
+            </button>
+          </div>
+        </div>
+
+        {displayMode === 'preview' ? (
+          <div className="space-y-4">
+            <FormDocumentViewer
+              base64Data={analysis.base64Data}
+              fileType={analysis.fileType}
+              fileName={analysis.fileName}
+              fields={fields}
+              showValues={false}
+              onSelectField={(f) => setCalibratingField(f)}
+              onUpdateFieldBbox={handleUpdateBbox}
+            />
+            <p className="text-[11px] text-slate-500 text-center">
+              💡 Drag any box to move it. Drag the corner to resize. Click on unplaced fields above to place them directly on your form.
+            </p>
+          </div>
+        ) : (
+          /* Grouped Fields Sections */
+          <div className="space-y-6">
           {sections.map(section => {
             const sectionFields = fields.filter(f => (f.section || 'General Details') === section);
 
@@ -277,9 +335,13 @@ export const DetectedFieldsPage: React.FC<DetectedFieldsPageProps> = ({
                               <span className="text-[10px] font-mono text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
                                 Type: {f.type}
                               </span>
-                              {f.bbox && (
+                              {f.bbox ? (
                                 <span className="text-[10px] font-mono text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
-                                  Coord: {f.bbox.x}%, {f.bbox.y}%
+                                  Position: {f.bbox.x}%, {f.bbox.y}%
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-300 px-1.5 py-0.5 rounded">
+                                  ⚠️ Needs Placement on Form
                                 </span>
                               )}
                               {f.currentValue && (
@@ -304,12 +366,19 @@ export const DetectedFieldsPage: React.FC<DetectedFieldsPageProps> = ({
 
                           <div className="flex items-center gap-2 self-end sm:self-start shrink-0">
                             <button
-                              onClick={() => setCalibratingField(f)}
-                              className="px-2 py-1 text-[11px] font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md transition-colors flex items-center gap-1 cursor-pointer"
-                              title="Calibrate visual position on original document"
+                              onClick={() => {
+                                setDisplayMode('preview');
+                                setCalibratingField(f);
+                              }}
+                              className={`px-2 py-1 text-[11px] font-medium rounded-md transition-colors flex items-center gap-1 cursor-pointer ${
+                                f.bbox
+                                  ? 'text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200'
+                                  : 'text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 font-bold'
+                              }`}
+                              title={f.bbox ? "Fine-tune visual position on original document" : "Place field on the document"}
                             >
                               <Crosshair className="w-3 h-3" />
-                              <span>Position</span>
+                              <span>{f.bbox ? 'Adjust Position' : 'Place on Form'}</span>
                             </button>
                             <button
                               onClick={() => setEditingFieldId(f.id)}
@@ -335,6 +404,7 @@ export const DetectedFieldsPage: React.FC<DetectedFieldsPageProps> = ({
             );
           })}
         </div>
+        )}
 
         {/* Bottom CTA Strip */}
         <div className="pt-6 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -369,33 +439,37 @@ export const DetectedFieldsPage: React.FC<DetectedFieldsPageProps> = ({
                 </button>
               </div>
 
-              {/* Blueprint Canvas Simulator */}
-              <div className="bg-slate-100 rounded-xl p-4 flex items-center justify-center">
-                <div className="w-64 h-80 bg-white border-2 border-slate-300 rounded shadow-md relative overflow-hidden select-none">
-                  {/* Subtle simulated page lines */}
-                  <div className="absolute top-4 left-4 right-4 h-3 bg-slate-200 rounded-xs" />
-                  <div className="absolute top-9 left-4 right-4 h-1.5 bg-slate-100 rounded-xs" />
+              {/* Real Document Canvas Simulator */}
+              <div className="bg-slate-100 rounded-xl p-4 flex items-center justify-center max-h-96 overflow-auto">
+                <div className="relative max-w-sm w-full bg-white border-2 border-slate-300 rounded shadow-md overflow-hidden select-none">
+                  {analysis.base64Data ? (
+                    <img
+                      src={analysis.base64Data}
+                      alt="Document calibration view"
+                      className="block w-full h-auto select-none pointer-events-none"
+                    />
+                  ) : (
+                    <div className="w-full h-72 bg-slate-50 flex items-center justify-center text-slate-400 text-xs">
+                      No document image preview
+                    </div>
+                  )}
 
                   {/* Active Bounding Box Highlight */}
                   {calibratingField.bbox && (
                     <div
-                      className="absolute border-2 border-blue-600 bg-blue-500/20 rounded-xs flex items-center justify-center transition-all duration-150"
+                      className="absolute border-2 border-blue-600 bg-blue-500/25 rounded-xs flex items-center justify-center transition-all duration-75 shadow-xs"
                       style={{
                         left: `${calibratingField.bbox.x}%`,
                         top: `${calibratingField.bbox.y}%`,
                         width: `${calibratingField.bbox.width}%`,
-                        height: `${Math.max(3, calibratingField.bbox.height || 3)}%`,
+                        height: `${Math.max(2.5, calibratingField.bbox.height || 2.5)}%`,
                       }}
                     >
-                      <span className="text-[8px] font-bold text-blue-900 truncate px-1">
+                      <span className="text-[9px] font-bold text-white bg-blue-700/90 px-1 py-0.5 rounded-xs truncate shadow-xs">
                         {calibratingField.label}
                       </span>
                     </div>
                   )}
-
-                  <div className="absolute bottom-2 left-4 text-[9px] text-slate-400 font-mono">
-                    Page 1 Blueprint (A4)
-                  </div>
                 </div>
               </div>
 

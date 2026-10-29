@@ -442,6 +442,11 @@ export const GuidedQuestionsPage: React.FC<GuidedQuestionsPageProps> = ({
                     {t.optionalBadge}
                   </span>
                 )}
+                {currentField.bbox && (
+                  <span className="text-[10px] font-mono text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                    Mapped: {Math.round(currentField.bbox.x)}%, {Math.round(currentField.bbox.y)}%
+                  </span>
+                )}
               </div>
 
               {/* Secondary bilingual title hint when in Telugu or Dual mode */}

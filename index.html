@@ -13,18 +13,54 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script>
-      // Gracefully ignore Vite HMR WebSocket connection errors in sandboxed iframe environment
-      window.addEventListener('error', function (e) {
-        if (e.message && (e.message.includes('WebSocket') || e.message.includes('@vite/client') || e.message.includes('createWebSocketModuleRunnerTransport'))) {
-          e.preventDefault();
+      (function() {
+        // Intercept Vite WebSocket runner errors in sandboxed proxy environment
+        var originalWS = window.WebSocket;
+        if (originalWS) {
+          window.WebSocket = function(url, protocols) {
+            try {
+              var ws = new originalWS(url, protocols);
+              ws.addEventListener('error', function(e) {
+                if (e && typeof e.stopImmediatePropagation === 'function') {
+                  e.stopImmediatePropagation();
+                }
+              });
+              return ws;
+            } catch (err) {
+              return {
+                addEventListener: function() {},
+                removeEventListener: function() {},
+                send: function() {},
+                close: function() {}
+              };
+            }
+          };
+          window.WebSocket.prototype = originalWS.prototype;
+          window.WebSocket.CONNECTING = originalWS.CONNECTING;
+          window.WebSocket.OPEN = originalWS.OPEN;
+          window.WebSocket.CLOSING = originalWS.CLOSING;
+          window.WebSocket.CLOSED = originalWS.CLOSED;
         }
-      });
-      window.addEventListener('unhandledrejection', function (e) {
-        var msg = (e.reason && (e.reason.message || String(e.reason))) || '';
-        if (msg.includes('WebSocket') || msg.includes('@vite/client') || msg.includes('createWebSocketModuleRunnerTransport')) {
-          e.preventDefault();
+
+        function suppressViteErrors(event) {
+          var targetStr = '';
+          if (event) {
+            targetStr = (event.message || '') + ' ' + (event.filename || '') + ' ' + (event.error ? event.error.stack : '') + ' ' + (event.reason ? (event.reason.message || event.reason.stack || String(event.reason)) : '');
+          }
+          if (
+            targetStr.indexOf('@vite/client') !== -1 ||
+            targetStr.indexOf('WebSocket') !== -1 ||
+            targetStr.indexOf('createWebSocketModuleRunnerTransport') !== -1
+          ) {
+            if (event.preventDefault) event.preventDefault();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+            return true;
+          }
         }
-      });
+
+        window.addEventListener('error', suppressViteErrors, true);
+        window.addEventListener('unhandledrejection', suppressViteErrors, true);
+      })();
     </script>
   </head>
   <body class="bg-white text-slate-900 antialiased font-sans selection:bg-blue-100 selection:text-blue-900">
