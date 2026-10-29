@@ -522,6 +522,17 @@ export async function analyzeDocumentClient(file: File): Promise<DocumentAnalysi
  * Client-Side PDF Generation Engine
  * Creates high-fidelity filled PDF overlays directly in the browser when serverless API is unavailable.
  */
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const len = bytes.byteLength;
+  const chunkSize = 8192;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  }
+  return btoa(binary);
+}
+
 export async function generateFilledPdfClient(params: {
   originalBase64: string;
   fileType: string;
@@ -564,7 +575,7 @@ export async function generateFilledPdfClient(params: {
     }
 
     const outputBytes = await pdfDoc.save();
-    return `data:application/pdf;base64,${btoa(String.fromCharCode(...outputBytes))}`;
+    return `data:application/pdf;base64,${uint8ArrayToBase64(outputBytes)}`;
   }
 
   // Case B: Scanned Flat PDF
@@ -609,7 +620,7 @@ export async function generateFilledPdfClient(params: {
     }
 
     const outputBytes = await pdfDoc.save();
-    return `data:application/pdf;base64,${btoa(String.fromCharCode(...outputBytes))}`;
+    return `data:application/pdf;base64,${uint8ArrayToBase64(outputBytes)}`;
   }
 
   // Case C: Photograph or Scanned Image (JPG, PNG)
@@ -671,5 +682,5 @@ export async function generateFilledPdfClient(params: {
   }
 
   const outputBytes = await pdfDoc.save();
-  return `data:application/pdf;base64,${btoa(String.fromCharCode(...outputBytes))}`;
+  return `data:application/pdf;base64,${uint8ArrayToBase64(outputBytes)}`;
 }

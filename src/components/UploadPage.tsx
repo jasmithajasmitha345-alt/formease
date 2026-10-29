@@ -148,18 +148,28 @@ export const UploadPage: React.FC<UploadPageProps> = ({
 
     setIsProcessing(true);
     setErrorMessage(null);
-    setUploadProgress(15);
+    setUploadProgress(20);
 
     try {
-      const formData = new FormData();
-      formData.append('file', selectedFile);
+      // 1. Read file as Base64 Data URL (safe across both client-side and serverless JSON payloads)
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('Failed to read file on device.'));
+        reader.readAsDataURL(selectedFile);
+      });
 
-      setUploadProgress(40);
+      setUploadProgress(45);
 
-      // 1. Try server-side analysis (runs in dev and Netlify Functions)
+      // 2. Try server/serverless API analysis
       const res = await safeFetchJson<DocumentAnalysisResult & { success?: boolean }>('/api/analyze-form', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          base64Data,
+          fileName: selectedFile.name,
+          mimeType: selectedFile.type,
+        }),
       });
 
       if (res.ok && res.data && res.data.fields && res.data.fields.length > 0) {
@@ -170,9 +180,8 @@ export const UploadPage: React.FC<UploadPageProps> = ({
         return;
       }
 
-      // 2. If the server returned HTML (e.g. Netlify static redirect /* /index.html)
-      // or server is unreachable, gracefully process the document client-side!
-      console.info('[FormEase] Backend returned HTML or was unavailable. Activating client-side document processing engine...');
+      // 3. Fallback to client-side document processing engine if backend is offline or returned HTML
+      console.info('[FormEase] Backend unavailable or returned HTML, running client processing engine...');
       setUploadProgress(70);
 
       const clientResult = await analyzeDocumentClient(selectedFile);
@@ -181,7 +190,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({
         onDocumentAnalyzed(clientResult);
       }, 350);
     } catch (err: any) {
-      console.warn('[FormEase] Server extraction note, running client analyzer:', err);
+      console.warn('[FormEase] Server analysis note, activating client processor fallback:', err);
       try {
         setUploadProgress(75);
         const clientResult = await analyzeDocumentClient(selectedFile);

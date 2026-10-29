@@ -3,10 +3,16 @@
   publish = "dist"
   functions = "netlify/functions"
 
-# Route API requests to Netlify Functions
+# Route API endpoints directly to their corresponding Netlify Functions
 [[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/api/:splat"
+  from = "/api/analyze-form"
+  to = "/.netlify/functions/analyze-form"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/generate-filled-pdf"
+  to = "/.netlify/functions/generate-filled-pdf"
   status = 200
   force = true
 

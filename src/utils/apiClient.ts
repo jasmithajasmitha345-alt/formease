@@ -15,24 +15,26 @@ export async function safeFetchJson<T>(url: string, init?: RequestInit): Promise
   try {
     const response = await fetch(url, init);
     const contentType = response.headers.get('content-type') || '';
+    const rawText = await response.text();
+    const trimmed = rawText.trim();
 
-    // Check if the server returned HTML (e.g. Netlify 404/SPA index.html fallback)
-    if (contentType.includes('text/html')) {
+    // Check if the server returned HTML (e.g. Netlify 404, SPA index.html fallback, or gateway error)
+    if (contentType.includes('text/html') || trimmed.startsWith('<') || trimmed.toLowerCase().startsWith('<!doctype')) {
       return {
         ok: false,
         status: response.status,
         isHtmlRedirect: true,
-        error: `Server returned an HTML document instead of JSON (Status ${response.status}). The requested endpoint '${url}' might not be routed to a serverless backend function.`,
+        error: `Server returned an HTML document instead of JSON (Status ${response.status}). The requested endpoint '${url}' is not a working JSON API.`,
       };
     }
 
-    if (contentType.includes('application/json')) {
-      const json = await response.json();
+    try {
+      const json = JSON.parse(rawText);
       if (!response.ok) {
         return {
           ok: false,
           status: response.status,
-          error: json.error || `HTTP error ${response.status}`,
+          error: json?.error || `HTTP error ${response.status}`,
           data: json,
         };
       }
@@ -41,23 +43,13 @@ export async function safeFetchJson<T>(url: string, init?: RequestInit): Promise
         status: response.status,
         data: json,
       };
-    }
-
-    // Other non-JSON content
-    const text = await response.text();
-    if (!response.ok) {
+    } catch {
       return {
         ok: false,
         status: response.status,
-        error: text || `HTTP error ${response.status}`,
+        error: rawText.slice(0, 150) || `HTTP error ${response.status}`,
       };
     }
-
-    return {
-      ok: false,
-      status: response.status,
-      error: `Unexpected response content-type: ${contentType}`,
-    };
   } catch (err: any) {
     return {
       ok: false,
