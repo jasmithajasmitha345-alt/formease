@@ -1,0 +1,6 @@
+{
+  "name": "FormEase",
+  "description": "Fill forms easily, without confusion. Understand confusing fields, answer simple questions, and download your completed original form as a ready PDF.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
