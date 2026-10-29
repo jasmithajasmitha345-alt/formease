@@ -13,6 +13,47 @@ import {
   FileCheck
 } from 'lucide-react';
 import { DocumentAnalysisResult, NavigationTab, SampleFormPreset } from '../types';
+import { safeFetchJson } from '../utils/apiClient';
+import { analyzeDocumentClient } from '../utils/clientDocumentProcessor';
+
+const DEFAULT_SAMPLE_PRESETS: SampleFormPreset[] = [
+  {
+    id: 'school-application',
+    name: 'Private School Admission Application Form',
+    type: 'application/pdf',
+    isFillable: false,
+    category: 'Scanned / Boxed Form',
+    description: "Official private school admission form with boxes for Parent/Guardian Name, Child's Age, Child's Name, Previous School, Address, City, Region, Postal Code, Country, and Phone.",
+    badge: 'Featured School Form',
+  },
+  {
+    id: 'scholarship-fillable',
+    name: 'Higher Education Scholarship Application',
+    type: 'application/pdf',
+    isFillable: true,
+    category: 'Interactive AcroForm',
+    description: 'Government scholarship application with fillable interactive fields, household income, academic records, and declaration confirmation.',
+    badge: 'Fillable PDF',
+  },
+  {
+    id: 'identity-scanned',
+    name: 'Official Citizen Identity Verification Form',
+    type: 'application/pdf',
+    isFillable: false,
+    category: 'Scanned Government Form',
+    description: 'Flat scanned citizen identity registration form with bounding-box input spaces and bilingual explanation requirements.',
+    badge: 'Scanned Paper Form',
+  },
+  {
+    id: 'grant-proposal-docx',
+    name: 'Academic Research Grant Proposal',
+    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    isFillable: false,
+    category: 'Microsoft Word Form',
+    description: 'Standard Word DOCX academic grant proposal template with investigator, funding, timeline, and abstract placeholders.',
+    badge: 'DOCX Word Form',
+  },
+];
 
 interface UploadPageProps {
   onDocumentAnalyzed: (result: DocumentAnalysisResult) => void;
@@ -30,15 +71,16 @@ export const UploadPage: React.FC<UploadPageProps> = ({
   const [uploadProgress, setUploadProgress] = React.useState(0);
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
-  const [samplePresets, setSamplePresets] = React.useState<SampleFormPreset[]>([]);
+  const [samplePresets, setSamplePresets] = React.useState<SampleFormPreset[]>(DEFAULT_SAMPLE_PRESETS);
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
-    fetch('/api/sample-forms')
-      .then(res => res.json())
-      .then(data => {
-        if (data.samples) setSamplePresets(data.samples);
+    safeFetchJson<{ samples: SampleFormPreset[] }>('/api/sample-forms')
+      .then(res => {
+        if (res.ok && res.data?.samples && res.data.samples.length > 0) {
+          setSamplePresets(res.data.samples);
+        }
       })
       .catch(console.warn);
 
@@ -112,28 +154,46 @@ export const UploadPage: React.FC<UploadPageProps> = ({
       const formData = new FormData();
       formData.append('file', selectedFile);
 
-      setUploadProgress(45);
+      setUploadProgress(40);
 
-      const response = await fetch('/api/analyze-form', {
+      // 1. Try server-side analysis (runs in dev and Netlify Functions)
+      const res = await safeFetchJson<DocumentAnalysisResult & { success?: boolean }>('/api/analyze-form', {
         method: 'POST',
         body: formData,
       });
 
-      setUploadProgress(85);
-
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to analyze document fields.');
+      if (res.ok && res.data && res.data.fields && res.data.fields.length > 0) {
+        setUploadProgress(100);
+        setTimeout(() => {
+          onDocumentAnalyzed(res.data!);
+        }, 300);
+        return;
       }
 
+      // 2. If the server returned HTML (e.g. Netlify static redirect /* /index.html)
+      // or server is unreachable, gracefully process the document client-side!
+      console.info('[FormEase] Backend returned HTML or was unavailable. Activating client-side document processing engine...');
+      setUploadProgress(70);
+
+      const clientResult = await analyzeDocumentClient(selectedFile);
       setUploadProgress(100);
       setTimeout(() => {
-        onDocumentAnalyzed(data);
-      }, 400);
+        onDocumentAnalyzed(clientResult);
+      }, 350);
     } catch (err: any) {
-      setErrorMessage(err.message || 'An error occurred during form extraction.');
-      setIsProcessing(false);
-      setUploadProgress(0);
+      console.warn('[FormEase] Server extraction note, running client analyzer:', err);
+      try {
+        setUploadProgress(75);
+        const clientResult = await analyzeDocumentClient(selectedFile);
+        setUploadProgress(100);
+        setTimeout(() => {
+          onDocumentAnalyzed(clientResult);
+        }, 350);
+      } catch (clientErr: any) {
+        setErrorMessage(clientErr.message || 'Unable to process the uploaded document. Please check the file format.');
+        setIsProcessing(false);
+        setUploadProgress(0);
+      }
     }
   };
 
@@ -143,26 +203,35 @@ export const UploadPage: React.FC<UploadPageProps> = ({
     setUploadProgress(30);
 
     try {
-      const response = await fetch('/api/analyze-form', {
+      const res = await safeFetchJson<DocumentAnalysisResult & { success?: boolean }>('/api/analyze-form', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sampleId }),
       });
 
-      setUploadProgress(80);
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to load sample form.');
+      if (res.ok && res.data && res.data.fields && res.data.fields.length > 0) {
+        setUploadProgress(100);
+        setTimeout(() => {
+          onDocumentAnalyzed(res.data!);
+        }, 300);
+        return;
       }
 
+      // Client-side sample mock loader
+      const syntheticFile = new File([''], `${sampleId}.pdf`, { type: 'application/pdf' });
+      const clientResult = await analyzeDocumentClient(syntheticFile);
       setUploadProgress(100);
       setTimeout(() => {
-        onDocumentAnalyzed(data);
-      }, 400);
+        onDocumentAnalyzed(clientResult);
+      }, 300);
     } catch (err: any) {
-      setErrorMessage(err.message || 'Unable to load sample form.');
-      setIsProcessing(false);
-      setUploadProgress(0);
+      console.warn('[FormEase] Sample load error:', err);
+      const syntheticFile = new File([''], `${sampleId}.pdf`, { type: 'application/pdf' });
+      const clientResult = await analyzeDocumentClient(syntheticFile);
+      setUploadProgress(100);
+      setTimeout(() => {
+        onDocumentAnalyzed(clientResult);
+      }, 300);
     }
   };
 

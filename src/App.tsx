@@ -12,6 +12,8 @@ import { AboutPage } from './components/AboutPage';
 import { PrivacyPage } from './components/PrivacyPage';
 import { ContactPage } from './components/ContactPage';
 import { DocumentAnalysisResult, FormField, NavigationTab } from './types';
+import { safeFetchJson } from './utils/apiClient';
+import { generateFilledPdfClient } from './utils/clientDocumentProcessor';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavigationTab>('home');
@@ -60,7 +62,8 @@ export default function App() {
     setGlobalError(null);
 
     try {
-      const response = await fetch('/api/generate-filled-pdf', {
+      // 1. Try server-side PDF generation
+      const res = await safeFetchJson<{ success?: boolean; pdfBase64?: string; error?: string }>('/api/generate-filled-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -72,16 +75,42 @@ export default function App() {
         }),
       });
 
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to populate original form.');
+      if (res.ok && res.data?.pdfBase64) {
+        setCompletedPdfUrl(res.data.pdfBase64);
+        setCurrentTab('preview');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
       }
 
-      setCompletedPdfUrl(data.pdfBase64);
+      // 2. Fallback to client-side PDF generation if server returned HTML redirect or unavailable
+      console.info('[FormEase] Generating filled PDF using client-side engine...');
+      const clientPdf = await generateFilledPdfClient({
+        originalBase64: analysisResult.base64Data,
+        fileType: analysisResult.fileType,
+        answers,
+        fields: analysisResult.fields,
+        isFillablePdf: analysisResult.isFillablePdf,
+      });
+
+      setCompletedPdfUrl(clientPdf);
       setCurrentTab('preview');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
-      setGlobalError(err.message || 'Error generating completed PDF.');
+      console.warn('[FormEase] Server PDF generation note, trying client generator:', err);
+      try {
+        const clientPdf = await generateFilledPdfClient({
+          originalBase64: analysisResult.base64Data,
+          fileType: analysisResult.fileType,
+          answers,
+          fields: analysisResult.fields,
+          isFillablePdf: analysisResult.isFillablePdf,
+        });
+        setCompletedPdfUrl(clientPdf);
+        setCurrentTab('preview');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (clientErr: any) {
+        setGlobalError(clientErr.message || 'Error generating completed PDF document.');
+      }
     } finally {
       setIsGenerating(false);
     }

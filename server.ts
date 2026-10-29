@@ -1852,4 +1852,10 @@ async function startServer() {
   });
 }
 
-startServer();
+export default app;
+export { app };
+
+// Only start the HTTP listener if not running in a serverless environment (e.g. Netlify Functions)
+if (process.env.NETLIFY !== 'true') {
+  startServer();
+}

@@ -24,6 +24,7 @@ import {
   WebFormIllustration,
   HeroIllustration 
 } from './FeatureIllustrations';
+import { safeFetchJson } from '../utils/apiClient';
 
 interface FeatureCardImageProps {
   src: string;
@@ -62,17 +63,57 @@ interface HomePageProps {
   onSelectSample: (sampleId: string) => void;
 }
 
+const DEFAULT_SAMPLE_PRESETS: SampleFormPreset[] = [
+  {
+    id: 'school-application',
+    name: 'Private School Admission Application Form',
+    type: 'application/pdf',
+    isFillable: false,
+    category: 'Scanned / Boxed Form',
+    description: "Official private school admission form with boxes for Parent/Guardian Name, Child's Age, Child's Name, Previous School, Address, City, Region, Postal Code, Country, and Phone.",
+    badge: 'Featured School Form',
+  },
+  {
+    id: 'scholarship-fillable',
+    name: 'Higher Education Scholarship Application',
+    type: 'application/pdf',
+    isFillable: true,
+    category: 'Interactive AcroForm',
+    description: 'Government scholarship application with fillable interactive fields, household income, academic records, and declaration confirmation.',
+    badge: 'Fillable PDF',
+  },
+  {
+    id: 'identity-scanned',
+    name: 'Official Citizen Identity Verification Form',
+    type: 'application/pdf',
+    isFillable: false,
+    category: 'Scanned Government Form',
+    description: 'Flat scanned citizen identity registration form with bounding-box input spaces and bilingual explanation requirements.',
+    badge: 'Scanned Paper Form',
+  },
+  {
+    id: 'grant-proposal-docx',
+    name: 'Academic Research Grant Proposal',
+    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    isFillable: false,
+    category: 'Microsoft Word Form',
+    description: 'Standard Word DOCX academic grant proposal template with investigator, funding, timeline, and abstract placeholders.',
+    badge: 'DOCX Word Form',
+  },
+];
+
 export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onSelectSample }) => {
-  const [samples, setSamples] = React.useState<SampleFormPreset[]>([]);
+  const [samples, setSamples] = React.useState<SampleFormPreset[]>(DEFAULT_SAMPLE_PRESETS);
   const [loadingSamples, setLoadingSamples] = React.useState(false);
   const [heroSrc, setHeroSrc] = React.useState<string>(heroImg);
   const [heroFailed, setHeroFailed] = React.useState<boolean>(false);
 
   React.useEffect(() => {
-    fetch('/api/sample-forms')
-      .then(res => res.json())
-      .then(data => {
-        if (data.samples) setSamples(data.samples);
+    safeFetchJson<{ samples: SampleFormPreset[] }>('/api/sample-forms')
+      .then(res => {
+        if (res.ok && res.data?.samples && res.data.samples.length > 0) {
+          setSamples(res.data.samples);
+        }
       })
       .catch(err => console.warn('Failed to fetch samples:', err));
   }, []);
