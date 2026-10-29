@@ -14,6 +14,48 @@ import {
   Laptop
 } from 'lucide-react';
 import { NavigationTab, SampleFormPreset } from '../types';
+import heroImg from '../assets/images/hero_form_assistance_1793162726049.jpg';
+import pdfScanImg from '../assets/images/feature_pdf_scan_1793162726599.jpg';
+import wordDocImg from '../assets/images/feature_word_doc_1793162727267.jpg';
+import webFormImg from '../assets/images/feature_web_form_1793162727351.jpg';
+import { 
+  PdfScanIllustration, 
+  WordDocIllustration, 
+  WebFormIllustration,
+  HeroIllustration 
+} from './FeatureIllustrations';
+
+interface FeatureCardImageProps {
+  src: string;
+  fallbackSrc: string;
+  alt: string;
+  illustration: React.ReactNode;
+}
+
+const FeatureCardImage: React.FC<FeatureCardImageProps> = ({ src, fallbackSrc, alt, illustration }) => {
+  const [currentSrc, setCurrentSrc] = React.useState<string>(src);
+  const [hasFailed, setHasFailed] = React.useState<boolean>(false);
+
+  if (hasFailed) {
+    return <div className="w-full h-full flex items-center justify-center p-2">{illustration}</div>;
+  }
+
+  return (
+    <img
+      src={currentSrc}
+      alt={alt}
+      loading="lazy"
+      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-102"
+      onError={() => {
+        if (currentSrc !== fallbackSrc) {
+          setCurrentSrc(fallbackSrc);
+        } else {
+          setHasFailed(true);
+        }
+      }}
+    />
+  );
+};
 
 interface HomePageProps {
   onNavigate: (tab: NavigationTab) => void;
@@ -23,6 +65,8 @@ interface HomePageProps {
 export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onSelectSample }) => {
   const [samples, setSamples] = React.useState<SampleFormPreset[]>([]);
   const [loadingSamples, setLoadingSamples] = React.useState(false);
+  const [heroSrc, setHeroSrc] = React.useState<string>(heroImg);
+  const [heroFailed, setHeroFailed] = React.useState<boolean>(false);
 
   React.useEffect(() => {
     fetch('/api/sample-forms')
@@ -95,27 +139,23 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onSelectSample }
 
             {/* Right Column: Hero Graphic */}
             <div className="lg:col-span-5 relative">
-              <div className="relative mx-auto rounded-2xl overflow-hidden shadow-xl border border-slate-200/80 bg-slate-100 aspect-[16/10] sm:aspect-[16/9] lg:aspect-[4/3] flex items-center justify-center">
-                <img
-                  src="/src/assets/images/hero_form_assistance_1793162726049.jpg"
-                  alt="FormEase intelligent document completion in action"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
-                  onError={(e) => {
-                    // Fallback container if asset path not reachable
-                    e.currentTarget.style.display = 'none';
-                  }}
-                />
-                {/* Fallback container with clean SVG overlay */}
-                <div className="absolute inset-0 bg-gradient-to-tr from-slate-900/90 via-slate-800/80 to-blue-900/90 p-6 flex flex-col justify-end text-white pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-blue-300">
-                    <ShieldCheck className="w-4 h-4" />
-                    Original Layout Preserved
-                  </div>
-                  <h3 className="text-base font-bold text-white mt-1">
-                    Your answers positioned cleanly on the exact original document.
-                  </h3>
-                </div>
+              <div className="relative mx-auto rounded-2xl overflow-hidden shadow-xl border border-slate-200/80 bg-slate-100 aspect-[16/10] sm:aspect-[16/9] lg:aspect-[4/3] flex items-center justify-center group">
+                {heroFailed ? (
+                  <HeroIllustration className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102" />
+                ) : (
+                  <img
+                    src={heroSrc}
+                    alt="FormEase intelligent document completion in action"
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102"
+                    onError={() => {
+                      if (heroSrc !== '/images/hero_form_assistance.jpg') {
+                        setHeroSrc('/images/hero_form_assistance.jpg');
+                      } else {
+                        setHeroFailed(true);
+                      }
+                    }}
+                  />
+                )}
               </div>
 
               {/* Trust Callout Floating Tag */}
@@ -147,13 +187,13 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onSelectSample }
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {/* Card 1: Upload a PDF or Image */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs hover:shadow-md transition-shadow flex flex-col">
-              <div className="rounded-xl overflow-hidden mb-5 aspect-[4/3] bg-slate-100 border border-slate-100">
-                <img
-                  src="/src/assets/images/feature_pdf_scan_1793162726599.jpg"
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs hover:shadow-md transition-shadow flex flex-col group">
+              <div className="rounded-xl overflow-hidden mb-5 aspect-[4/3] bg-slate-100 border border-slate-200/80 flex items-center justify-center">
+                <FeatureCardImage
+                  src={pdfScanImg}
+                  fallbackSrc="/images/feature_pdf_scan.jpg"
                   alt="Upload a PDF or Image"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
+                  illustration={<PdfScanIllustration className="w-full h-full" />}
                 />
               </div>
               <h3 className="text-lg font-bold text-slate-900 font-display">
@@ -174,13 +214,13 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onSelectSample }
             </div>
 
             {/* Card 2: Upload a Word Document */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs hover:shadow-md transition-shadow flex flex-col">
-              <div className="rounded-xl overflow-hidden mb-5 aspect-[4/3] bg-slate-100 border border-slate-100">
-                <img
-                  src="/src/assets/images/feature_word_doc_1793162727267.jpg"
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs hover:shadow-md transition-shadow flex flex-col group">
+              <div className="rounded-xl overflow-hidden mb-5 aspect-[4/3] bg-slate-100 border border-slate-200/80 flex items-center justify-center">
+                <FeatureCardImage
+                  src={wordDocImg}
+                  fallbackSrc="/images/feature_word_doc.jpg"
                   alt="Upload a Word Document"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
+                  illustration={<WordDocIllustration className="w-full h-full" />}
                 />
               </div>
               <h3 className="text-lg font-bold text-slate-900 font-display">
@@ -201,13 +241,13 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onSelectSample }
             </div>
 
             {/* Card 3: Fill a Website Form */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs hover:shadow-md transition-shadow flex flex-col">
-              <div className="rounded-xl overflow-hidden mb-5 aspect-[4/3] bg-slate-100 border border-slate-100">
-                <img
-                  src="/src/assets/images/feature_web_form_1793162727351.jpg"
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs hover:shadow-md transition-shadow flex flex-col group">
+              <div className="rounded-xl overflow-hidden mb-5 aspect-[4/3] bg-slate-100 border border-slate-200/80 flex items-center justify-center">
+                <FeatureCardImage
+                  src={webFormImg}
+                  fallbackSrc="/images/feature_web_form.jpg"
                   alt="Fill a Website Form"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
+                  illustration={<WebFormIllustration className="w-full h-full" />}
                 />
               </div>
               <h3 className="text-lg font-bold text-slate-900 font-display">
